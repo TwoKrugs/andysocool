@@ -1,9 +1,8 @@
-# Dockerfile
 FROM gcc:latest
-
 WORKDIR /app
-COPY . /app
+COPY . .
 
-RUN gcc -o myapp test.c
+RUN gcc -o server server.c && gcc -o client client.c
+RUN chmod +x entrypoint.sh
 
-CMD ["./myapp"]
+CMD ["./entrypoint.sh"]

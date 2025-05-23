@@ -1,0 +1,29 @@
+version: "3.8"
+services:
+  server:
+    build: ./server
+    container_name: chat-server
+    stdin_open: true
+    tty: true
+    networks:
+      - chatnet
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "12345"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  client:
+    build: ./client
+    container_name: chat-client
+    stdin_open: true
+    tty: true
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - chatnet
+
+networks:
+  chatnet:
+    driver: bridge
