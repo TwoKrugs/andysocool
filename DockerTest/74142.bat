@@ -6,7 +6,7 @@ set TAG=latest
 
 docker network rm chatnet
 
-docker network create --subnet=172.31.0.0/16 --gateway=172.31.0.1 --driver bridge chatnet
+REM docker network create --subnet=172.31.0.0/16 --gateway=172.31.0.1 --driver bridge chatnet
 
 echo build Docker image...
 
@@ -19,7 +19,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-docker run -it --rm --name server --network chatnet --ip 172.31.0.10 server
+REM docker run -it --rm --name server --network chatnet --ip 172.31.0.10 server
+docker run --rm -it -p 65520:12345/tcp server
 
 echo RUN END.
 pause

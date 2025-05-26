@@ -6,6 +6,11 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+// #define IP "172.31.0.10"
+#define IP "172.31.1.44"
+// #define PORT 12345
+#define PORT 65520
+
 int sock;
 
 void* receive_messages(void* arg) {
@@ -29,8 +34,8 @@ int main() {
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(12345);
-    inet_pton(AF_INET, "172.20.0.10", &server_addr.sin_addr);  // 改成伺服器 IP
+    server_addr.sin_port = htons(PORT);
+    inet_pton(AF_INET, IP, &server_addr.sin_addr);  // 改成伺服器 IP
 
     connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
     printf("Connected to server.\n");

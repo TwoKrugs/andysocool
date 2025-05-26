@@ -6,6 +6,8 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+#define PORT 12345
+
 int client_fd;
 
 void* receive_messages(void* arg) {
@@ -33,7 +35,7 @@ int main() {
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(12345);
+    server_addr.sin_port = htons(PORT);
 
     bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
     listen(server_fd, 1);
