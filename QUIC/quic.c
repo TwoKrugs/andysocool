@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
     // 對方
     memset(&peer_addr, 0, sizeof(peer_addr));
     peer_addr.sin_family = AF_INET;
-    peer_addr.sin_port = htons(7680);
+    peer_addr.sin_port = htons(PORT);
     inet_pton(AF_INET, argv[1], &peer_addr.sin_addr);
 
     // 建立兩個執行緒
