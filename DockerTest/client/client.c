@@ -30,7 +30,7 @@ int main() {
     sock = socket(AF_INET, SOCK_STREAM, 0);
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(12345);
-    inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);  // 改成伺服器 IP
+    inet_pton(AF_INET, "server", &server_addr.sin_addr);  // 改成伺服器 IP
 
     connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
     printf("Connected to server.\n");

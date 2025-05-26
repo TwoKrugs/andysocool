@@ -4,8 +4,12 @@ REM 設定變數
 set IMAGE_NAME=myapp
 set TAG=latest
 
+docker network create chatnet
+
 echo build Docker image...
-docker build -t %IMAGE_NAME%:%TAG% .
+
+docker build -t server ./server
+docker build -t client ./client
 
 if errorlevel 1 (
     echo Build ERROR!
@@ -13,9 +17,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Build Success
-REM docker run --rm -it %IMAGE_NAME%:%TAG%
-docker run -d -p 49738:80 %IMAGE_NAME%:%TAG%
+docker run -it --rm --name server --network chatnet server
 
 echo RUN END.
 pause
