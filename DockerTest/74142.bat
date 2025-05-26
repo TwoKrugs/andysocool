@@ -10,7 +10,7 @@ if errorlevel 1 (
 )
 
 echo Build Success
-docker-compose up
+docker-compose up -d
 
 echo RUN END.
 pause
