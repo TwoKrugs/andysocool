@@ -5,8 +5,7 @@ echo  Building Docker image...
 docker build -t %IMAGE_NAME% .
 
 echo  Running container...
-docker run -it --rm %IMAGE_NAME%
-
+docker run --rm -it -p 5050:8888/udp %IMAGE_NAME%
 echo  Removing Docker image...
 docker rmi %IMAGE_NAME%
 
