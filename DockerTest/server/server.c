@@ -5,10 +5,13 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #define PORT 12345
 #define MAX_CLIENTS 10
 #define NAME_LEN 100
+#define BUF_SIZE 2048
 
 typedef struct {
     int socket;
@@ -18,6 +21,58 @@ typedef struct {
 
 client_info clients[MAX_CLIENTS];
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+char* convert_image_to_ascii(const char* image_data, int image_size) {
+    int in_pipe[2];  // 父寫入圖片給子行程 stdin
+    int out_pipe[2]; // 子行程輸出 ASCII 到父 stdout
+
+    if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
+        perror("pipe failed");
+        return NULL;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork failed");
+        return NULL;
+    }
+
+    if (pid == 0) {
+        // child: exec jp2a，從 stdin 讀圖片，stdout 輸出 ASCII
+
+        dup2(in_pipe[0], STDIN_FILENO);   // 讀圖片
+        dup2(out_pipe[1], STDOUT_FILENO); // 寫 ASCII
+
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+
+        execlp("jp2a", "jp2a", "--width=80", "-", NULL);
+        perror("exec failed");
+        exit(1);
+    } else {
+        // parent
+        close(in_pipe[0]);
+        close(out_pipe[1]);
+
+        // 寫圖片給 jp2a
+        write(in_pipe[1], image_data, (unsigned int)image_size);
+        close(in_pipe[1]);  // EOF to child
+
+        // 讀 ASCII 結果
+        char *ascii = malloc(BUF_SIZE);
+        ascii[0] = '\0';
+        char buffer[256];
+        ssize_t n;
+        while ((n = read(out_pipe[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[n] = '\0';
+            strcat(ascii, buffer);
+        }
+        close(out_pipe[0]);
+
+        wait(NULL);  // 等 jp2a 結束
+        return ascii;
+    }
+}
 
 void broadcast_message(const char *msg, int sender_fd) {
     pthread_mutex_lock(&lock);
@@ -32,7 +87,7 @@ void broadcast_message(const char *msg, int sender_fd) {
 void* handle_client(void* arg) {
     client_info *client = (client_info*)arg;
     int client_fd = client->socket;
-    char buffer[1024], msg[1100];
+    char buffer[BUF_SIZE], msg[1100];
 
     // 接收名稱
     memset(client->name, 0, NAME_LEN);
@@ -45,6 +100,7 @@ void* handle_client(void* arg) {
     while (1) {
         memset(buffer, 0, sizeof(buffer));
         int bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+        ////
         if (bytes <= 0 || strcmp(buffer, "/exit\n") == 0) {
             snprintf(msg, sizeof(msg), "[%s] left the chat.\n", client->name);
             printf("%s", msg);
@@ -61,8 +117,26 @@ void* handle_client(void* arg) {
             pthread_mutex_unlock(&lock);
             free(client);
             break;
+        } else if (strncmp(buffer, "IMAGE:", 6) == 0) {
+            int size = atoi(buffer + 6);
+            char* img_data = malloc(size);
+            int received = 0;
+            while (received < size) {
+                int r = recv(client_fd, img_data + received, size - received, 0);
+                if (r <= 0) break;
+                received += r;
+            }
+            if (BUF_SIZE < size){
+              snprintf(buffer, sizeof(buffer), "Image size too big!!\n");
+            } else {
+              char *ascii = convert_image_to_ascii(img_data, size);
+              strncpy(buffer, ascii, sizeof(buffer));
+              free(ascii);  // 不要忘記釋放！
+            }
+            free(img_data);
         }
 
+        ////
         snprintf(msg, sizeof(msg), "[%s] %s", client->name, buffer);
         printf("%s", msg);
         broadcast_message(msg, client_fd);
