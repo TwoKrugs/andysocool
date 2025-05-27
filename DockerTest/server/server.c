@@ -8,10 +8,12 @@
 
 #define PORT 12345
 #define MAX_CLIENTS 10
+#define NAME_LEN 100
 
 typedef struct {
     int socket;
     struct sockaddr_in addr;
+    char name[NAME_LEN];
 } client_info;
 
 client_info clients[MAX_CLIENTS];
@@ -31,11 +33,12 @@ void* handle_client(void* arg) {
     client_info *client = (client_info*)arg;
     int client_fd = client->socket;
     char buffer[1024], msg[1100];
-    char client_ip[INET_ADDRSTRLEN];
 
-    inet_ntop(AF_INET, &(client->addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+    // 接收名稱
+    memset(client->name, 0, NAME_LEN);
+    recv(client_fd, client->name, NAME_LEN, 0);
 
-    snprintf(msg, sizeof(msg), "[%s] joined the chat.\n", client_ip);
+    snprintf(msg, sizeof(msg), "[%s] joined the chat.\n", client->name);
     printf("%s", msg);
     broadcast_message(msg, client_fd);
 
@@ -43,7 +46,7 @@ void* handle_client(void* arg) {
         memset(buffer, 0, sizeof(buffer));
         int bytes = recv(client_fd, buffer, sizeof(buffer), 0);
         if (bytes <= 0 || strcmp(buffer, "/exit\n") == 0) {
-            snprintf(msg, sizeof(msg), "[%s] left the chat.\n", client_ip);
+            snprintf(msg, sizeof(msg), "[%s] left the chat.\n", client->name);
             printf("%s", msg);
             broadcast_message(msg, client_fd);
 
@@ -60,7 +63,7 @@ void* handle_client(void* arg) {
             break;
         }
 
-        snprintf(msg, sizeof(msg), "[%s] %s", client_ip, buffer);
+        snprintf(msg, sizeof(msg), "[%s] %s", client->name, buffer);
         printf("%s", msg);
         broadcast_message(msg, client_fd);
     }
@@ -74,7 +77,6 @@ int main() {
     socklen_t addr_len = sizeof(client_addr);
 
     memset(clients, 0, sizeof(clients));
-
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     server_addr.sin_family = AF_INET;
@@ -111,7 +113,7 @@ int main() {
         }
 
         client_info *new_client = malloc(sizeof(client_info));
-        *new_client = (client_info){client_fd, client_addr};
+        *new_client = (client_info){client_fd, client_addr, ""};
 
         pthread_t thread_id;
         pthread_create(&thread_id, NULL, handle_client, new_client);
