@@ -1,0 +1,234 @@
+// multi_server.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#define PORT 12345
+#define MAX_CLIENTS 10
+#define NAME_LEN 100
+#define BUF_SIZE 2048
+
+typedef struct {
+    int socket;
+    struct sockaddr_in addr;
+    char name[NAME_LEN];
+} client_info;
+
+client_info clients[MAX_CLIENTS];
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+char* convert_image_to_ascii(const char* image_data, int image_size) {
+    int in_pipe[2];  // 父寫入圖片給子行程 stdin
+    int out_pipe[2]; // 子行程輸出 ASCII 到父 stdout
+
+    if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
+        perror("pipe failed");
+        return NULL;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork failed");
+        return NULL;
+    }
+
+    if (pid == 0) {
+        // child: exec jp2a，從 stdin 讀圖片，stdout 輸出 ASCII
+
+        dup2(in_pipe[0], STDIN_FILENO);   // 讀圖片
+        dup2(out_pipe[1], STDOUT_FILENO); // 寫 ASCII
+
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+
+        execlp("jp2a", "jp2a", "--width=80", "-", NULL);
+        perror("exec failed");
+        exit(1);
+    } else {
+        // parent
+        close(in_pipe[0]);
+        close(out_pipe[1]);
+
+        // 寫圖片給 jp2a
+        write(in_pipe[1], image_data, (unsigned int)image_size);
+        close(in_pipe[1]);  // EOF to child
+
+        // 讀 ASCII 結果
+        
+        char *ascii = malloc(image_size);
+        ascii[0] = '\0';
+        char buffer[256];
+        ssize_t n;
+        while ((n = read(out_pipe[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[n] = '\0';
+            strcat(ascii, buffer);
+        }
+        close(out_pipe[0]);
+
+        wait(NULL);  // 等 jp2a 結束
+        return ascii;
+    }
+}
+
+void broadcast_message(char *msg, int sender_fd) {
+    pthread_mutex_lock(&lock);
+
+    // 計算原始訊息長度
+    size_t msg_len = strlen(msg);
+
+    // 建立前綴長度字串，例如 LEN=0012|
+    char prefix[20];  // 足夠容納前綴
+    snprintf(prefix, sizeof(prefix), "LEN=%04zu|", msg_len);  // 固定4位長度
+
+    // 建立完整訊息字串
+    size_t full_len = strlen(prefix) + msg_len + 1;
+    char *full_msg = malloc(full_len);
+    if (!full_msg) {
+        perror("malloc failed");
+        pthread_mutex_unlock(&lock);
+        return;
+    }
+
+    // 合併 prefix + msg
+    strcpy(full_msg, prefix);
+    strcat(full_msg, msg);
+
+    // 廣播訊息
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].socket != 0 && clients[i].socket != sender_fd) {
+            send(clients[i].socket, full_msg, strlen(full_msg), 0);
+        }
+    }
+
+    free(full_msg);
+    pthread_mutex_unlock(&lock);
+}
+
+void* handle_client(void* arg) {
+    client_info *client = (client_info*)arg;
+    int client_fd = client->socket;
+    char buffer[BUF_SIZE];
+    char *msg = NULL;
+
+    
+    memset(client->name, 0, NAME_LEN);
+    recv(client_fd, client->name, NAME_LEN, 0);
+
+    
+    size_t msg_size = 1024;
+    msg = malloc(msg_size);
+
+    snprintf(msg, msg_size, "[%s] joined the chat.\n", client->name);
+    printf("%s", msg);
+    broadcast_message(msg, client_fd);
+
+    while (1) {
+        memset(buffer, 0, sizeof(buffer));
+        int bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+        if (bytes <= 0 || strcmp(buffer, "/exit\n") == 0) {
+            snprintf(msg, msg_size, "[%s] left the chat.\n", client->name);
+            printf("%s", msg);
+            broadcast_message(msg, client_fd);
+
+            close(client_fd);
+            pthread_mutex_lock(&lock);
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                if (clients[i].socket == client_fd) {
+                    clients[i].socket = 0;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&lock);
+            free(msg);
+            free(client);
+            break;
+        } else if (strncmp(buffer, "IMAGE:", 6) == 0) {
+            int size = atoi(buffer + 6);
+            char* img_data = malloc(size);
+            int received = 0;
+            while (received < size) {
+                int r = recv(client_fd, img_data + received, size - received, 0);
+                if (r <= 0) break;
+                received += r;
+            }
+
+            char *ascii = convert_image_to_ascii(img_data, size);
+
+            
+            size_t new_msg_size = strlen(ascii) + strlen(client->name) + 16;
+            msg = realloc(msg, new_msg_size);
+            snprintf(msg, new_msg_size, "[%s]\n%s", client->name, ascii);
+
+            free(ascii);
+            free(img_data);
+        } else {
+            size_t new_msg_size = strlen(buffer) + strlen(client->name) + 16;
+            msg = realloc(msg, new_msg_size);
+            snprintf(msg, new_msg_size, "[%s] %s\n", client->name, buffer);
+        }
+
+        printf("%s", msg);
+        broadcast_message(msg, client_fd);
+    }
+
+    return NULL;
+}
+
+
+int main() {
+    int server_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+
+    memset(clients, 0, sizeof(clients));
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    listen(server_fd, MAX_CLIENTS);
+    printf("Server is listening on port %d...\n", PORT);
+
+    while (1) {
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_fd < 0) {
+            perror("accept failed");
+            continue;
+        }
+
+        pthread_mutex_lock(&lock);
+        int stored = 0;
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i].socket == 0) {
+                clients[i].socket = client_fd;
+                clients[i].addr = client_addr;
+                stored = 1;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&lock);
+
+        if (!stored) {
+            printf("Max clients reached. Connection rejected.\n");
+            close(client_fd);
+            continue;
+        }
+
+        client_info *new_client = malloc(sizeof(client_info));
+        *new_client = (client_info){client_fd, client_addr, ""};
+
+        pthread_t thread_id;
+        pthread_create(&thread_id, NULL, handle_client, new_client);
+        pthread_detach(thread_id);
+    }
+
+    close(server_fd);
+    return 0;
+}
