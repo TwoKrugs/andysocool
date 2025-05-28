@@ -75,13 +75,37 @@ char* convert_image_to_ascii(const char* image_data, int image_size) {
     }
 }
 
-void broadcast_message(const char *msg, int sender_fd) {
+void broadcast_message(char *msg, int sender_fd) {
     pthread_mutex_lock(&lock);
+
+    // 計算原始訊息長度
+    size_t msg_len = strlen(msg);
+
+    // 建立前綴長度字串，例如 LEN=0012|
+    char prefix[20];  // 足夠容納前綴
+    snprintf(prefix, sizeof(prefix), "LEN=%04zu|", msg_len);  // 固定4位長度
+
+    // 建立完整訊息字串
+    size_t full_len = strlen(prefix) + msg_len + 1;
+    char *full_msg = malloc(full_len);
+    if (!full_msg) {
+        perror("malloc failed");
+        pthread_mutex_unlock(&lock);
+        return;
+    }
+
+    // 合併 prefix + msg
+    strcpy(full_msg, prefix);
+    strcat(full_msg, msg);
+
+    // 廣播訊息
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket != 0 && clients[i].socket != sender_fd) {
-            send(clients[i].socket, msg, strlen(msg), 0);
+            send(clients[i].socket, full_msg, strlen(full_msg), 0);
         }
     }
+
+    free(full_msg);
     pthread_mutex_unlock(&lock);
 }
 
@@ -138,14 +162,14 @@ void* handle_client(void* arg) {
             
             size_t new_msg_size = strlen(ascii) + strlen(client->name) + 16;
             msg = realloc(msg, new_msg_size);
-            snprintf(msg, new_msg_size, "[%s]\n %s", client->name, ascii);
+            snprintf(msg, new_msg_size, "[%s]\n%s", client->name, ascii);
 
             free(ascii);
             free(img_data);
         } else {
             size_t new_msg_size = strlen(buffer) + strlen(client->name) + 16;
             msg = realloc(msg, new_msg_size);
-            snprintf(msg, new_msg_size, "[%s] %s", client->name, buffer);
+            snprintf(msg, new_msg_size, "[%s] %s\n", client->name, buffer);
         }
 
         printf("%s", msg);

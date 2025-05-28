@@ -23,8 +23,28 @@ void* receive_handler(void* arg) {
             close(sock);
             exit(0);
         }
-        printf("\r%s", buffer);
-        printf(": "); fflush(stdout);
+
+        // 嘗試解析長度
+        const char *start = strstr(buffer, "LEN=");
+        if (start) {
+            char len_str[5] = {0}; // "0012"
+            strncpy(len_str, start + 4, 4);
+            int length = atoi(len_str);
+
+            // 找訊息開始點
+            const char *content = strchr(start, '|');
+            if (content && strlen(content + 1) >= length) {
+                printf("\r%s", content + 1);  // 印出精確長度的內容後換行與提示
+                fflush(stdout);
+            } else {
+                printf("%s", content + 1);
+                fflush(stdout);
+            }
+        } else {
+            // fallback：沒有 LEN 標記就直接印
+            printf("%s", buffer);
+            fflush(stdout);
+        }
     }
     return NULL;
 }
@@ -96,7 +116,7 @@ int main() {
             break;
         }
 
-        send(sock, buffer, strlen(buffer), 0);
+        send(sock, buffer, strlen(buffer)-1, 0);
     }
 
     close(sock);
