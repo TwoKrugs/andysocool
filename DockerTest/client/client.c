@@ -15,6 +15,7 @@ int sock;
 
 void* receive_handler(void* arg) {
     char buffer[BUF_SIZE];
+    int length = 0;
     while (1) {
         memset(buffer, 0, BUF_SIZE);
         int bytes = recv(sock, buffer, BUF_SIZE, 0);
@@ -27,23 +28,27 @@ void* receive_handler(void* arg) {
         // 嘗試解析長度
         const char *start = strstr(buffer, "LEN=");
         if (start) {
-            char len_str[5] = {0}; // "0012"
-            strncpy(len_str, start + 4, 4);
-            int length = atoi(len_str);
+          char len_str[5] = {0}; // "0012"
+          strncpy(len_str, start + 4, 4);
+          length = atoi(len_str);
 
-            // 找訊息開始點
-            const char *content = strchr(start, '|');
-            if (content && strlen(content + 1) >= length) {
-                printf("\r%s", content + 1);  // 印出精確長度的內容後換行與提示
-                fflush(stdout);
-            } else {
-                printf("%s", content + 1);
-                fflush(stdout);
-            }
-        } else {
-            // fallback：沒有 LEN 標記就直接印
-            printf("%s", buffer);
+          // 找訊息開始點
+          const char *content = strchr(start, '|') + 1;
+
+          if(length >= 0){
+            length -= (printf("\r%s", content) - 1);
             fflush(stdout);
+          }
+        } else {
+          if (length > 0){
+            length -= printf("%s", buffer);
+            fflush(stdout);
+          }
+        }
+
+        if (length <= 0){
+          printf(": ");
+          fflush(stdout);
         }
     }
     return NULL;
