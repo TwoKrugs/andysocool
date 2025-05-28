@@ -8,7 +8,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#define PORT 12345
+#define PORT 2869
 #define MAX_CLIENTS 10
 #define NAME_LEN 100
 #define BUF_SIZE 2048
