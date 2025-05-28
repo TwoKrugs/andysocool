@@ -59,7 +59,8 @@ char* convert_image_to_ascii(const char* image_data, int image_size) {
         close(in_pipe[1]);  // EOF to child
 
         // 讀 ASCII 結果
-        char *ascii = malloc(BUF_SIZE);
+        
+        char *ascii = malloc(image_size);
         ascii[0] = '\0';
         char buffer[256];
         ssize_t n;
@@ -87,22 +88,26 @@ void broadcast_message(const char *msg, int sender_fd) {
 void* handle_client(void* arg) {
     client_info *client = (client_info*)arg;
     int client_fd = client->socket;
-    char buffer[BUF_SIZE], msg[1100];
+    char buffer[BUF_SIZE];
+    char *msg = NULL;
 
-    // 接收名稱
+    
     memset(client->name, 0, NAME_LEN);
     recv(client_fd, client->name, NAME_LEN, 0);
 
-    snprintf(msg, sizeof(msg), "[%s] joined the chat.\n", client->name);
+    
+    size_t msg_size = 1024;
+    msg = malloc(msg_size);
+
+    snprintf(msg, msg_size, "[%s] joined the chat.\n", client->name);
     printf("%s", msg);
     broadcast_message(msg, client_fd);
 
     while (1) {
         memset(buffer, 0, sizeof(buffer));
         int bytes = recv(client_fd, buffer, sizeof(buffer), 0);
-        ////
         if (bytes <= 0 || strcmp(buffer, "/exit\n") == 0) {
-            snprintf(msg, sizeof(msg), "[%s] left the chat.\n", client->name);
+            snprintf(msg, msg_size, "[%s] left the chat.\n", client->name);
             printf("%s", msg);
             broadcast_message(msg, client_fd);
 
@@ -115,6 +120,7 @@ void* handle_client(void* arg) {
                 }
             }
             pthread_mutex_unlock(&lock);
+            free(msg);
             free(client);
             break;
         } else if (strncmp(buffer, "IMAGE:", 6) == 0) {
@@ -126,24 +132,29 @@ void* handle_client(void* arg) {
                 if (r <= 0) break;
                 received += r;
             }
-            if (BUF_SIZE < size){
-              snprintf(buffer, sizeof(buffer), "Image size too big!!\n");
-            } else {
-              char *ascii = convert_image_to_ascii(img_data, size);
-              strncpy(buffer, ascii, sizeof(buffer));
-              free(ascii);  // 不要忘記釋放！
-            }
+
+            char *ascii = convert_image_to_ascii(img_data, size);
+
+            
+            size_t new_msg_size = strlen(ascii) + strlen(client->name) + 16;
+            msg = realloc(msg, new_msg_size);
+            snprintf(msg, new_msg_size, "[%s]\n %s", client->name, ascii);
+
+            free(ascii);
             free(img_data);
+        } else {
+            size_t new_msg_size = strlen(buffer) + strlen(client->name) + 16;
+            msg = realloc(msg, new_msg_size);
+            snprintf(msg, new_msg_size, "[%s] %s", client->name, buffer);
         }
 
-        ////
-        snprintf(msg, sizeof(msg), "[%s] %s", client->name, buffer);
         printf("%s", msg);
         broadcast_message(msg, client_fd);
     }
 
     return NULL;
 }
+
 
 int main() {
     int server_fd;

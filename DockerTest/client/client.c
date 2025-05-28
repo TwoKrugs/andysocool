@@ -90,6 +90,7 @@ int main() {
         if (strncmp(buffer, "/img ", 5) == 0) {
             buffer[strcspn(buffer, "\n")] = 0;
             send_image(buffer + 5);
+            continue;
         } else if (strcmp(buffer, "/exit\n") == 0) {
             send(sock, buffer, strlen(buffer), 0);
             break;
