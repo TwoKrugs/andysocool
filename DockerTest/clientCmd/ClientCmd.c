@@ -5,13 +5,18 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <pthread.h>
+#include <conio.h>
 
 #pragma comment(lib, "ws2_32.lib")
 //172.31.1.44 andyboss ip
 //172.31.1.63 jon ip
+#define IP "172.31.1.44"
+#define PORT 65520
 #define BUF_SIZE 2048
 
 int sock;
+char InputBuffer[BUF_SIZE];
+int InputSizeNow = 0;
 
 void* receive_handler(void* arg) {
     char buffer[BUF_SIZE];
@@ -35,7 +40,7 @@ void* receive_handler(void* arg) {
             if (content) content++;
 
             if (length >= 0 && content) {
-                printf("\r");
+                printf("\r%*s\r", InputSizeNow + 2, " ");
                 length -= printf("%s", content);
                 fflush(stdout);
             }
@@ -48,6 +53,7 @@ void* receive_handler(void* arg) {
 
         if (length <= 0) {
             printf(": ");
+            printf("%.*s", InputSizeNow, InputBuffer);
             fflush(stdout);
         }
     }
@@ -81,6 +87,31 @@ void send_image(const char* path) {
     printf("[Image sent to server]\n");
 }
 
+void read_input_realtime(char* buffer, size_t size) {
+    InputSizeNow = 0;
+    while (InputSizeNow < size - 1) {
+        char ch = _getch();
+
+        if (ch == '\b') {
+            if (InputSizeNow > 0) {
+                InputSizeNow--;
+                printf("\b \b");
+            }
+            continue;
+        }
+
+        putchar(ch);
+        buffer[InputSizeNow++] = ch;
+
+        if (ch == '\r') {
+            putchar('\n');
+            break;
+        }
+    }
+
+    buffer[InputSizeNow] = '\0';
+}
+
 int main() {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -90,7 +121,6 @@ int main() {
 
     struct sockaddr_in server_addr;
     struct addrinfo hints, *res;
-    char buffer[BUF_SIZE];
     char name[100];
     char ip_input[100];
     char port_input[10];
@@ -100,9 +130,23 @@ int main() {
     fgets(ip_input, sizeof(ip_input), stdin);
     ip_input[strcspn(ip_input, "\n")] = 0;
 
+    //-------------test case-------------
+    if (ip_input[0] == 0){
+      memset(ip_input, 0, 100);
+      strcpy(ip_input, IP);
+    }
+    //-----------------------------------
+
     printf("Enter server Port: ");
     fgets(port_input, sizeof(port_input), stdin);
-    port = atoi(port_input);
+
+    //-------------test case-------------
+    if (port_input[0] = '\n'){
+      port = PORT;
+    } else {
+      port = atoi(port_input);
+    }
+    //-----------------------------------
 
     printf("Enter your name: ");
     fgets(name, sizeof(name), stdin);
@@ -143,18 +187,19 @@ int main() {
 
     while (1) {
         printf(": ");
-        fgets(buffer, BUF_SIZE, stdin);
+        read_input_realtime(InputBuffer, BUF_SIZE);
+        // fgets(InputBuffer, BUF_SIZE, stdin);
 
-        if (strncmp(buffer, "/img ", 5) == 0) {
-            buffer[strcspn(buffer, "\n")] = 0;
-            send_image(buffer + 5);
+        if (strncmp(InputBuffer, "/img ", 5) == 0) {
+            InputBuffer[strcspn(InputBuffer, "\n")] = 0;
+            send_image(InputBuffer + 5);
             continue;
-        } else if (strcmp(buffer, "/exit\n") == 0) {
-            send(sock, buffer, strlen(buffer), 0);
+        } else if (strcmp(InputBuffer, "/exit\n") == 0) {
+            send(sock, InputBuffer, strlen(InputBuffer), 0);
             break;
         }
 
-        send(sock, buffer, strlen(buffer) - 1, 0);
+        send(sock, InputBuffer, strlen(InputBuffer) - 1, 0);
     }
 
     closesocket(sock);
