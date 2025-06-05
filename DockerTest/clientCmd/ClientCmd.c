@@ -316,7 +316,7 @@ int main() {
       send_image(gInputBuffer + 5);
       continue;
     } else if (wcscmp(gInputBuffer, L"/exit") == 0) {
-      send_utf8(gSock, gInputBuffer);
+      // send_utf8(gSock, gInputBuffer);
       break;
     }
 
