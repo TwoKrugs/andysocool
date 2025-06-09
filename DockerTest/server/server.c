@@ -82,13 +82,11 @@ convert_image_to_ascii (
 }
 
 void
-broadcast_message (
-  char  *msg,
-  int   sender_fd
+send_message (
+  char *msg,
+  int  receive_fd
   )
 {
-  pthread_mutex_lock (&lock);
-
   // 計算原始訊息長度
   size_t  msg_len = strlen (msg);
 
@@ -101,7 +99,6 @@ broadcast_message (
   char    *full_msg = malloc (full_len);
   if (!full_msg) {
     perror ("malloc failed");
-    pthread_mutex_unlock (&lock);
     return;
   }
 
@@ -109,14 +106,28 @@ broadcast_message (
   strcpy (full_msg, prefix);
   strcat (full_msg, msg);
 
+  send (receive_fd, full_msg, strlen (full_msg), 0);
+
+  free (full_msg);
+}
+
+void
+broadcast_message (
+  char  *msg,
+  int   sender_fd
+  )
+{
+  printf ("%s", msg);
+  
+  pthread_mutex_lock (&lock);
+
   // 廣播訊息
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if ((clients[i].socket != 0) && (clients[i].socket != sender_fd)) {
-      send (clients[i].socket, full_msg, strlen (full_msg), 0);
+      send_message (msg, clients[i].socket);
     }
   }
 
-  free (full_msg);
   pthread_mutex_unlock (&lock);
 }
 
@@ -137,15 +148,13 @@ handle_client (
   msg = malloc (msg_size);
 
   snprintf (msg, msg_size, "[%s] joined the chat.\n", client->name);
-  printf ("%s", msg);
   broadcast_message (msg, client_fd);
 
   while (1) {
     memset (buffer, 0, sizeof (buffer));
     int  bytes = recv (client_fd, buffer, sizeof (buffer), 0);
-    if ((bytes <= 0) || (strcmp (buffer, "/exit\n") == 0)) {
+    if ((bytes <= 0)) {
       snprintf (msg, msg_size, "[%s] left the chat.\n", client->name);
-      printf ("%s", msg);
       broadcast_message (msg, client_fd);
 
       close (client_fd);
@@ -188,7 +197,6 @@ handle_client (
       snprintf (msg, new_msg_size, "[%s] %s\n", client->name, buffer);
     }
 
-    printf ("%s", msg);
     broadcast_message (msg, client_fd);
   }
 
