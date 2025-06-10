@@ -17,6 +17,8 @@ typedef struct {
   int                   socket;
   struct sockaddr_in    addr;
   char                  name[NAME_LEN];
+  int                   private_chat;
+  bool                  is_server_message;
 } client_info;
 
 client_info      clients[MAX_CLIENTS];
@@ -118,8 +120,6 @@ broadcast_message (
   int   sender_fd
   )
 {
-  printf ("%s", msg);
-
   pthread_mutex_lock (&lock);
 
   // 廣播訊息
@@ -132,14 +132,15 @@ broadcast_message (
   pthread_mutex_unlock (&lock);
 }
 
-void
+char *
 handle_messages (
-  char         *msg,
   client_info  *client,
   int          client_fd,
   char         *buffer
   )
 {
+  char  *msg = NULL;
+
   if (strncmp (buffer, "IMAGE:", 6) == 0) {
     int   size      = atoi (buffer + 6);
     char  *img_data = malloc (size);
@@ -156,19 +157,65 @@ handle_messages (
     char  *ascii = convert_image_to_ascii (img_data, size);
 
     size_t  new_msg_size = strlen (ascii) + strlen (client->name) + 16;
-    msg = realloc (msg, new_msg_size);
+    msg = malloc (new_msg_size);
     snprintf (msg, new_msg_size, "[%s]\n%s", client->name, ascii);
-
-    broadcast_message (msg, client_fd);
 
     free (ascii);
     free (img_data);
+  } else if (strncmp (buffer, "/memberlist", 11) == 0) {
+    client->is_server_message = true;
+    size_t  new_msg_size = NAME_LEN * MAX_CLIENTS + 64; // 多留一點空間
+    msg = malloc (new_msg_size);
+
+    memset (msg, 0, new_msg_size);
+
+    size_t  used = snprintf (msg, new_msg_size, "Member List: ");
+
+    pthread_mutex_lock (&lock);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if (clients[i].socket != 0) {
+        // 追加使用 snprintf，保證不溢位
+        printf ("%s\n", clients[i].name);
+        used += snprintf (msg + used, new_msg_size - used, "%s ", clients[i].name);
+        printf ("%s\n", msg);
+      }
+    }
+
+    pthread_mutex_unlock (&lock);
+    printf ("%s\n", msg);
+    snprintf (msg + used, new_msg_size - used, "\n");  // 安全補上換行
+    printf ("%s", msg);
+  } else if (strncmp (buffer, "/chat ", 6) == 0) {
+    client->is_server_message = true;
+    size_t  new_msg_size = BUF_SIZE;
+    msg = malloc (new_msg_size);
+    memset (msg, 0, new_msg_size);
+    char  *new_chat = strstr (buffer, " ");
+    if (new_chat) {
+      new_chat++;
+    }
+
+    client->private_chat = 0;
+    pthread_mutex_lock (&lock);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if ((clients[i].socket != 0) && (strcmp (clients[i].name, new_chat) == 0)) {
+        client->private_chat = clients[i].socket;
+        break;
+      }
+    }
+
+    pthread_mutex_unlock (&lock);
+    if (client->private_chat != 0) {
+      snprintf (msg, new_msg_size, "You are chat with %s\n", new_chat);
+    } else {
+      snprintf (msg, new_msg_size, "Not user \"%s\"\n", new_chat);
+    }
   } else {
     size_t  new_msg_size = strlen (buffer) + strlen (client->name) + 16;
-    msg = realloc (msg, new_msg_size);
+    msg = malloc (new_msg_size);
     snprintf (msg, new_msg_size, "[%s] %s\n", client->name, buffer);
-    broadcast_message (msg, client_fd);
   }
+  return msg;
 }
 
 void *
@@ -181,7 +228,8 @@ handle_client (
   char         buffer[BUF_SIZE];
   char         *msg = NULL;
 
-  size_t  msg_size = 1024;
+  size_t  msg_size = BUF_SIZE;
+
   msg = malloc (msg_size);
 
   snprintf (msg, msg_size, "[%s] joined the chat.\n", client->name);
@@ -191,6 +239,7 @@ handle_client (
     memset (buffer, 0, sizeof (buffer));
     int  bytes = recv (client_fd, buffer, sizeof (buffer), 0);
     if ((bytes <= 0)) {
+      msg = malloc (msg_size);
       snprintf (msg, msg_size, "[%s] left the chat.\n", client->name);
       broadcast_message (msg, client_fd);
 
@@ -208,8 +257,24 @@ handle_client (
       free (client);
       break;
     } else {
-      handle_messages (msg, client, client_fd, buffer);
+      msg = handle_messages (client, client_fd, buffer);
     }
+
+    if (client->is_server_message) {
+      printf ("%s", msg);
+      send_message (msg, client_fd);
+      client->is_server_message = false;
+      continue;
+    }
+
+    if (client->private_chat == 0) {
+      printf ("%s", msg);
+      broadcast_message (msg, client_fd);
+    } else {
+      printf ("%s", msg);
+      send_message (msg, client->private_chat);
+    }
+    free(msg);
   }
 
   return NULL;
@@ -243,7 +308,7 @@ main (
 
     client_info  *new_client = malloc (sizeof (client_info));
     *new_client = (client_info) {
-      client_fd, client_addr, ""
+      client_fd, client_addr, "", 0, false
     };
 
     memset (new_client->name, 0, NAME_LEN);
