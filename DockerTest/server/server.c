@@ -111,6 +111,18 @@ send_message (
 }
 
 void
+private_message (
+  char  *msg,
+  int   receive_fd
+)
+{
+  size_t length  = strlen(msg) + 4;
+  char  *new_msg = malloc(length);
+  snprintf (new_msg, length, "/p%s", msg);
+  send_message (new_msg, receive_fd);
+}
+
+void
 broadcast_message (
   char  *msg,
   int   sender_fd
@@ -172,7 +184,7 @@ handle_messages (
       if (clients[i].socket != 0) {
         // 追加使用 snprintf，保證不溢位
         printf ("%s\n", clients[i].name);
-        used += snprintf (msg + used, new_msg_size - used, "%s ", clients[i].name);
+        used += snprintf (msg + used, new_msg_size - used, "[%s] ", clients[i].name);
         printf ("%s\n", msg);
       }
     }
@@ -301,7 +313,7 @@ handle_client (
         broadcast_message (msg, client_fd);
       } else {
         printf ("%s", msg);
-        send_message (msg, client->private_chat);
+        private_message (msg, client->private_chat);
       }
       free(msg);
     }
