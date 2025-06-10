@@ -62,7 +62,8 @@ int send_utf8(int sock, const wchar_t *input) {
 
 void *receive_handler(void *arg) {
     char rawBuffer[BUF_SIZE] = {0};
-    wchar_t Buffer[BUF_SIZE] = {0};
+    char *Content = NULL;
+    wchar_t OutputBuffer[BUF_SIZE] = {0};
     int Length = 0;
 
     while (1) {
@@ -74,41 +75,41 @@ void *receive_handler(void *arg) {
             exit(0);
         }
         rawBuffer[Bytes] = '\0'; // 確保字串結尾
-        
-        // 將 UTF-8 轉換為 wchar_t
-        int wLen = MultiByteToWideChar(CP_UTF8, 0, rawBuffer, -1, Buffer, BUF_SIZE);
-        if (wLen <= 0) {
-            wprintf(L"[Error] Failed to convert UTF-8 to wide char\n");
-            continue;
-        }
 
-        const wchar_t *Start = wcsstr(Buffer, L"LEN=");
+        char *Start = strstr(rawBuffer, "LEN=");
         if (Start) {
-            wchar_t LenStr[5] = {0};
-            wchar_t *endptr;
-            wcsncpy(LenStr, Start + 4, 4);
-            Length = wcstol(LenStr, &endptr, 10);
-            const wchar_t *Content = wcsstr(Start, L"|");
+            char LenStr[5] = {0};
+            char *endptr;
+            strncpy(LenStr, Start + 4, 4);
+            Length = strtol(LenStr, &endptr, 10);
+            Content = strstr(Start, "|");
             if (Content) {
                 Content++;
             }
 
             if ((Length >= 0) && Content) {
                 wprintf(L"\r%*s\r", gInputSizeNow + 2, L" ");
-                Length -= wprintf(L"%s", Content);
-                fflush(stdout);
+                Length -= strlen(Content);
             }
         } else {
             if (Length > 0) {
-                Length -= wprintf(L"%s", Buffer);
-                fflush(stdout);
+                Content = rawBuffer;
+                Length -= strlen(rawBuffer);
             }
         }
 
+        int wLen = MultiByteToWideChar(CP_UTF8, 0, Content, -1, OutputBuffer, BUF_SIZE);
+        if (wLen <= 0) {
+            wprintf(L"[Error] Failed to convert UTF-8 to wide char\n");
+            continue;
+        }
+
+        wprintf(L"%s", OutputBuffer);
+        fflush(stdout);
         if (Length <= 0) {
-            wprintf(L": ");
-            wprintf(L"%s", gInputBuffer);
-            fflush(stdout);
+          wprintf(L": ");
+          wprintf(L"%s", gInputBuffer);
+          fflush(stdout);
         }
     }
     return NULL;
