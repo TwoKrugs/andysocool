@@ -269,9 +269,11 @@ int main() {
   }
   // -----------------------------------
 
-  wprintf(L"Enter your Name: ");
-  fgetws(Name, sizeof(Name) / sizeof(wchar_t), stdin);
-  Name[wcscspn(Name, L"\n")] = 0;
+  do{
+    wprintf(L"Enter your Name: ");
+    fgetws(Name, sizeof(Name) / sizeof(wchar_t), stdin);
+    Name[wcscspn(Name, L"\n")] = 0;
+  } while (Name[0] == 0);
 
   gSock = socket(AF_INET, SOCK_STREAM, 0);
   if (gSock == INVALID_SOCKET) {

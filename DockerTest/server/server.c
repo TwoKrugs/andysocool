@@ -1,4 +1,4 @@
-// multi_server.c
+// multi_server.c (with anti-spam)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +7,8 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <stdbool.h>
 
 #define PORT         12345
 #define MAX_CLIENTS  10
@@ -16,6 +18,10 @@
 typedef struct {
   int                   socket;
   struct sockaddr_in    addr;
+  bool                  ban;
+  time_t                ban_until;
+  time_t                msg_times[6];
+  int                   msg_index;
   char                  name[NAME_LEN];
   int                   private_chat;
   bool                  is_server_message;
@@ -30,8 +36,8 @@ convert_image_to_ascii (
   int         image_size
   )
 {
-  int  in_pipe[2];   // 父寫入圖片給子行程 stdin
-  int  out_pipe[2];  // 子行程輸出 ASCII 到父 stdout
+  int  in_pipe[2];
+  int  out_pipe[2];
 
   if ((pipe (in_pipe) == -1) || (pipe (out_pipe) == -1)) {
     perror ("pipe failed");
@@ -45,27 +51,19 @@ convert_image_to_ascii (
   }
 
   if (pid == 0) {
-    // child: exec jp2a，從 stdin 讀圖片，stdout 輸出 ASCII
-
-    dup2 (in_pipe[0], STDIN_FILENO);      // 讀圖片
-    dup2 (out_pipe[1], STDOUT_FILENO);    // 寫 ASCII
-
+    dup2 (in_pipe[0], STDIN_FILENO);
+    dup2 (out_pipe[1], STDOUT_FILENO);
     close (in_pipe[1]);
     close (out_pipe[0]);
-
     execlp ("jp2a", "jp2a", "--width=80", "-", NULL);
     perror ("exec failed");
     exit (1);
   } else {
-    // parent
     close (in_pipe[0]);
     close (out_pipe[1]);
 
-    // 寫圖片給 jp2a
     write (in_pipe[1], image_data, (unsigned int)image_size);
-    close (in_pipe[1]);     // EOF to child
-
-    // 讀 ASCII 結果
+    close (in_pipe[1]);
 
     char  *ascii = malloc (image_size);
     ascii[0] = '\0';
@@ -77,8 +75,7 @@ convert_image_to_ascii (
     }
 
     close (out_pipe[0]);
-
-    wait (NULL);     // 等 jp2a 結束
+    wait (NULL);
     return ascii;
   }
 }
@@ -105,7 +102,6 @@ send_message (
     return;
   }
 
-  // 合併 prefix + msg
   strcpy (full_msg, prefix);
   strcat (full_msg, msg);
 
@@ -211,10 +207,43 @@ handle_messages (
       snprintf (msg, new_msg_size, "Not user \"%s\"\n", new_chat);
     }
   } else {
+    time_t  now = time (NULL);
+    if (client->ban && (now < client->ban_until)) {
+      client->is_server_message = true;
+      int   remaining = (int)(client->ban_until - now);
+      int   msg_size = 128;
+      msg = malloc (msg_size);
+      snprintf (msg, msg_size, "你還剩下 %d 秒才能說話,你好爛.\n", remaining);
+      send_message (msg, client_fd);
+      return NULL;
+    }
+
+    client->msg_times[client->msg_index] = now;
+    client->msg_index                    = (client->msg_index + 1) % 5;
+    int  recent_count = 0;
+    for (int i = 0; i < 5; i++) {
+      if (now - client->msg_times[i] <= 5) {
+        recent_count++;
+      }
+    }
+
+    if (recent_count >= 5) {
+      client->is_server_message = true;
+      int   msg_size = 128;
+      msg = malloc (msg_size);
+      client->ban       = true;
+      client->ban_until = now + 15;
+      printf ("[%s] 這位用戶很皮被ban了.\n", client->name);
+      snprintf (msg, msg_size, "還敢洗頻阿,拉基,15秒好好反省.\n");
+      send_message (msg, client_fd);
+      return NULL;
+    }
+
     size_t  new_msg_size = strlen (buffer) + strlen (client->name) + 16;
     msg = malloc (new_msg_size);
     snprintf (msg, new_msg_size, "[%s] %s\n", client->name, buffer);
   }
+
   return msg;
 }
 
@@ -238,11 +267,10 @@ handle_client (
   while (1) {
     memset (buffer, 0, sizeof (buffer));
     int  bytes = recv (client_fd, buffer, sizeof (buffer), 0);
-    if ((bytes <= 0)) {
+    if (bytes <= 0) {
       msg = malloc (msg_size);
       snprintf (msg, msg_size, "[%s] left the chat.\n", client->name);
       broadcast_message (msg, client_fd);
-
       close (client_fd);
       pthread_mutex_lock (&lock);
       for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -260,21 +288,23 @@ handle_client (
       msg = handle_messages (client, client_fd, buffer);
     }
 
-    if (client->is_server_message) {
-      printf ("%s", msg);
-      send_message (msg, client_fd);
-      client->is_server_message = false;
-      continue;
-    }
+    if (msg != NULL){
+      if (client->is_server_message) {
+        printf ("%s", msg);
+        send_message (msg, client_fd);
+        client->is_server_message = false;
+        continue;
+      }
 
-    if (client->private_chat == 0) {
-      printf ("%s", msg);
-      broadcast_message (msg, client_fd);
-    } else {
-      printf ("%s", msg);
-      send_message (msg, client->private_chat);
+      if (client->private_chat == 0) {
+        printf ("%s", msg);
+        broadcast_message (msg, client_fd);
+      } else {
+        printf ("%s", msg);
+        send_message (msg, client->private_chat);
+      }
+      free(msg);
     }
-    free(msg);
   }
 
   return NULL;
