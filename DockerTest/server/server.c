@@ -75,13 +75,22 @@ convert_image_to_ascii(const char *image_data, int image_size) {
 }
 
 void
-send_message(char *msg, int receive_fd) {
-  size_t msg_len = strlen(msg);
-  char prefix[20];
-  snprintf(prefix, sizeof(prefix), "LEN=%04zu|", msg_len);
+send_message (
+  char  *msg,
+  int   receive_fd
+  )
+{
+  // 計算原始訊息長度
+  size_t  msg_len = strlen (msg);
 
-  size_t full_len = strlen(prefix) + msg_len + 1;
-  char *full_msg = malloc(full_len);
+  // 建立前綴長度字串，例如 LEN=0012|
+  char  prefix[20];                                          // 足夠容納前綴
+
+  snprintf (prefix, sizeof (prefix), "LEN=%04zu|", msg_len); // 固定4位長度
+
+  // 建立完整訊息字串
+  size_t  full_len  = strlen (prefix) + msg_len + 1;
+  char    *full_msg = malloc (full_len);
   if (!full_msg) {
     perror("malloc failed");
     return;
@@ -96,15 +105,61 @@ send_message(char *msg, int receive_fd) {
 }
 
 void
-broadcast_message(char *msg, int sender_fd) {
-  printf("%s", msg);
-  pthread_mutex_lock(&lock);
+broadcast_message (
+  char  *msg,
+  int   sender_fd
+  )
+{
+  printf ("%s", msg);
+
+  pthread_mutex_lock (&lock);
+
+  // 廣播訊息
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if ((clients[i].socket != 0) && (clients[i].socket != sender_fd)) {
       send_message(msg, clients[i].socket);
     }
   }
   pthread_mutex_unlock(&lock);
+}
+
+void
+handle_messages (
+  char         *msg,
+  client_info  *client,
+  int          client_fd,
+  char         *buffer
+  )
+{
+  if (strncmp (buffer, "IMAGE:", 6) == 0) {
+    int   size      = atoi (buffer + 6);
+    char  *img_data = malloc (size);
+    int   received  = 0;
+    while (received < size) {
+      int  r = recv (client_fd, img_data + received, size - received, 0);
+      if (r <= 0) {
+        break;
+      }
+
+      received += r;
+    }
+
+    char  *ascii = convert_image_to_ascii (img_data, size);
+
+    size_t  new_msg_size = strlen (ascii) + strlen (client->name) + 16;
+    msg = realloc (msg, new_msg_size);
+    snprintf (msg, new_msg_size, "[%s]\n%s", client->name, ascii);
+
+    broadcast_message (msg, client_fd);
+
+    free (ascii);
+    free (img_data);
+  } else {
+    size_t  new_msg_size = strlen (buffer) + strlen (client->name) + 16;
+    msg = realloc (msg, new_msg_size);
+    snprintf (msg, new_msg_size, "[%s] %s\n", client->name, buffer);
+    broadcast_message (msg, client_fd);
+  }
 }
 
 void *
@@ -114,13 +169,11 @@ handle_client(void *arg) {
   char buffer[BUF_SIZE];
   char *msg = NULL;
 
-  memset(client->name, 0, NAME_LEN);
-  recv(client_fd, client->name, NAME_LEN, 0);
+  size_t  msg_size = 1024;
+  msg = malloc (msg_size);
 
-  size_t msg_size = 1024;
-  msg = malloc(msg_size);
-  snprintf(msg, msg_size, "[%s] joined the chat.\n", client->name);
-  broadcast_message(msg, client_fd);
+  snprintf (msg, msg_size, "[%s] joined the chat.\n", client->name);
+  broadcast_message (msg, client_fd);
 
   while (1) {
     memset(buffer, 0, sizeof(buffer));
@@ -185,6 +238,7 @@ handle_client(void *arg) {
       snprintf(msg, new_msg_size, "[%s] %s\n", client->name, buffer);
     }
     broadcast_message(msg, client_fd);
+    
   }
 
   return NULL;
@@ -214,13 +268,20 @@ main() {
       continue;
     }
 
-    pthread_mutex_lock(&lock);
-    int stored = 0;
+    client_info  *new_client = malloc (sizeof (client_info));
+    *new_client = (client_info) {
+      client_fd, client_addr, ""
+    };
+
+    memset (new_client->name, 0, NAME_LEN);
+    recv (client_fd, new_client->name, NAME_LEN, 0);
+
+    pthread_mutex_lock (&lock);
+    int  stored = 0;
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (clients[i].socket == 0) {
-        clients[i].socket = client_fd;
-        clients[i].addr = client_addr;
-        stored = 1;
+        clients[i] = *new_client;
+        stored     = 1;
         break;
       }
     }
@@ -232,14 +293,9 @@ main() {
       continue;
     }
 
-    client_info *new_client = malloc(sizeof(client_info));
-    memset(new_client, 0, sizeof(client_info));
-    new_client->socket = client_fd;
-    new_client->addr = client_addr;
-
-    pthread_t thread_id;
-    pthread_create(&thread_id, NULL, handle_client, new_client);
-    pthread_detach(thread_id);
+    pthread_t  thread_id;
+    pthread_create (&thread_id, NULL, handle_client, new_client);
+    pthread_detach (thread_id);
   }
 
   close(server_fd);
