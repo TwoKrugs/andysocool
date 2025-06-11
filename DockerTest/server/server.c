@@ -216,7 +216,11 @@ handle_messages (
     if (client->private_chat != 0) {
       snprintf (msg, new_msg_size, "You are chat with %s\n", new_chat);
     } else {
-      snprintf (msg, new_msg_size, "Not user \"%s\"\n", new_chat);
+      if (strcmp (new_chat, "lobby") == 0){
+        snprintf (msg, new_msg_size, "You are lobby.\n");
+      } else {
+        snprintf (msg, new_msg_size, "Not found user \"%s\", you are lobby.\n", new_chat);
+      }
     }
   } else {
     time_t  now = time (NULL);
