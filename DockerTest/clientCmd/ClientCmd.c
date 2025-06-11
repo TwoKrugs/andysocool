@@ -36,14 +36,6 @@ boolean is_chinese(wchar_t ch) {
           );
 }
 
-void print_wild_char(wchar_t ch) {
-  if (is_chinese(ch)){
-    wprintf(L"%c%c", ch&0xFF00, ch&0xFF);
-  } else {
-    wprintf(L"%c", ch&0xFF);
-  }
-}
-
 // 轉 UTF-8 傳送函式
 int send_utf8(int sock, const wchar_t *input) {
     if (!input) return -1;
