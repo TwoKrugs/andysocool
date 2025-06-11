@@ -179,7 +179,7 @@ message_hob (
   } else {
     if (check_chat(client->private_chat) == false){
       char fail_msg[150] = "";
-      snprintf (fail_msg, 150, "PRIVATE=%s|User [%s] Not Found! You Are Lobby Now.\n", LOBBY_NAME, client->private_chat_name);
+      snprintf (fail_msg, 150, "PRIVATE=%s|User [%s] Not Found! You Are In The Lobby.\n", LOBBY_NAME, client->private_chat_name);
       send_message (fail_msg, client->socket);
       client->private_chat = 0;
       strcpy (client->private_chat_name, LOBBY_NAME);
@@ -266,12 +266,12 @@ handle_messages (
 
     pthread_mutex_unlock (&lock);
     if (client->private_chat != 0) {
-      snprintf (msg, new_msg_size, "PRIVATE=%s|You are chat with %s\n", new_chat, new_chat);
+      snprintf (msg, new_msg_size, "PRIVATE=%s|You are in the chat with %s\n", new_chat, new_chat);
     } else {
       if (strcmp (new_chat, "lobby") == 0){
-        snprintf (msg, new_msg_size, "PRIVATE=%s|You are lobby.\n", LOBBY_NAME);
+        snprintf (msg, new_msg_size, "PRIVATE=%s|You are in the lobby.\n", LOBBY_NAME);
       } else {
-        snprintf (msg, new_msg_size, "PRIVATE=%s|Not found user \"%s\", you are lobby.\n", LOBBY_NAME, new_chat);
+        snprintf (msg, new_msg_size, "PRIVATE=%s|Not found user \"%s\", you are in the lobby.\n", LOBBY_NAME, new_chat);
       }
     }
   } else {
