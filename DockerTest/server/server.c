@@ -120,6 +120,7 @@ private_message (
   char  *new_msg = malloc(length);
   snprintf (new_msg, length, "/p%s", msg);
   send_message (new_msg, receive_fd);
+  free (new_msg);
 }
 
 void
@@ -276,7 +277,10 @@ handle_client (
   msg = malloc (msg_size);
 
   snprintf (msg, msg_size, "[%s] joined the chat.\n", client->name);
+  printf ("%s", msg);
   broadcast_message (msg, client_fd);
+
+  free (msg);
 
   while (1) {
     memset (buffer, 0, sizeof (buffer));
@@ -284,6 +288,7 @@ handle_client (
     if (bytes <= 0) {
       msg = malloc (msg_size);
       snprintf (msg, msg_size, "[%s] left the chat.\n", client->name);
+      printf ("%s", msg);
       broadcast_message (msg, client_fd);
       close (client_fd);
       pthread_mutex_lock (&lock);
