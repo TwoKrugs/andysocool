@@ -14,10 +14,12 @@
 #define IP        L"172.26.32.1"
 #define PORT      65520
 #define BUF_SIZE  2048
+#define NAME_LEN  100
 
 int      gSock;
 wchar_t  gInputBuffer[BUF_SIZE];
 int      gInputSizeNow = 0;
+wchar_t  gChatTarget[NAME_LEN];
 
 void wperror_errno(const wchar_t *prefix) {
     char *errmsg = strerror(errno);
@@ -96,10 +98,22 @@ void *receive_handler(void *arg) {
             continue;
         }
 
-        wprintf(L"%s", OutputBuffer);
+        size_t SkipLen = 0;
+
+        if (wcsncmp (OutputBuffer, L"/private", 8) == 0){
+          wchar_t temp[NAME_LEN];
+          wcscpy (temp, OutputBuffer + 8);
+          const wchar_t *sep = wcschr(temp, '|');
+          SkipLen = sep - temp; // 計算 | 前的長度
+          memset (gChatTarget, 0, NAME_LEN);
+          wcsncpy(gChatTarget, temp, SkipLen);
+          SkipLen += 8;
+        }
+
+        wprintf(L"%s", OutputBuffer + SkipLen);
         fflush(stdout);
         if (Length <= 0) {
-          wprintf(L": ");
+          wprintf(L"%s: ", gChatTarget);
           wprintf(L"%s", gInputBuffer);
           fflush(stdout);
         }
@@ -268,6 +282,9 @@ int main() {
     Name[wcscspn(Name, L"\n")] = 0;
   } while (Name[0] == 0);
 
+  memset (gChatTarget, 0, NAME_LEN);
+  wcsncpy(gChatTarget, L"lobby", 6);
+
   gSock = socket(AF_INET, SOCK_STREAM, 0);
   if (gSock == INVALID_SOCKET) {
     wprintf(L"socket failed\n");
@@ -303,7 +320,7 @@ int main() {
   pthread_create(&recv_thread, NULL, receive_handler, NULL);
 
   while (1) {
-    wprintf(L": ");
+    wprintf(L"%s: ", gChatTarget);
     read_input_realtime();
 
     if (wcsncmp(gInputBuffer, L"/img ", 5) == 0) {

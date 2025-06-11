@@ -14,6 +14,7 @@
 #define MAX_CLIENTS  10
 #define NAME_LEN     100
 #define BUF_SIZE     2048
+#define LOBBY_NAME   "lobby"
 
 typedef struct {
   int                   socket;
@@ -178,10 +179,10 @@ message_hob (
   } else {
     if (check_chat(client->private_chat) == false){
       char fail_msg[150] = "";
-      snprintf (fail_msg, 150, "User [%s] Not Found! You Are Lobby Now.\n", client->private_chat_name);
+      snprintf (fail_msg, 150, "/private%s|User [%s] Not Found! You Are Lobby Now.\n", LOBBY_NAME, client->private_chat_name);
       send_message (fail_msg, client->socket);
       client->private_chat = 0;
-      memset(client->private_chat_name, 0, NAME_LEN);
+      strcpy (client->private_chat_name, LOBBY_NAME);
     } else {
       printf ("%s", msg);
       private_message (msg, client->private_chat);
@@ -253,7 +254,7 @@ handle_messages (
     }
 
     client->private_chat = 0;
-    memset(client->private_chat_name, 0, NAME_LEN);
+    strcpy (client->private_chat_name, LOBBY_NAME);
     pthread_mutex_lock (&lock);
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if ((clients[i].socket != 0) && (strcmp (clients[i].name, new_chat) == 0)) {
@@ -265,12 +266,12 @@ handle_messages (
 
     pthread_mutex_unlock (&lock);
     if (client->private_chat != 0) {
-      snprintf (msg, new_msg_size, "You are chat with %s\n", new_chat);
+      snprintf (msg, new_msg_size, "/private%s|You are chat with %s\n", new_chat, new_chat);
     } else {
       if (strcmp (new_chat, "lobby") == 0){
-        snprintf (msg, new_msg_size, "You are lobby.\n");
+        snprintf (msg, new_msg_size, "/private%s|You are lobby.\n", LOBBY_NAME);
       } else {
-        snprintf (msg, new_msg_size, "Not found user \"%s\", you are lobby.\n", new_chat);
+        snprintf (msg, new_msg_size, "/private%s|Not found user \"%s\", you are lobby.\n", LOBBY_NAME, new_chat);
       }
     }
   } else {
@@ -399,7 +400,7 @@ main (
     new_client->addr = client_addr;
     memset(new_client->name, 0, NAME_LEN);
     new_client->private_chat = 0;
-    memset(new_client->private_chat_name, 0, NAME_LEN);
+    strcpy (new_client->private_chat_name, LOBBY_NAME);
     new_client->is_server_message = false;
 
     memset (new_client->name, 0, NAME_LEN);
