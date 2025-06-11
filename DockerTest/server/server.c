@@ -312,9 +312,7 @@ handle_client (
         send_message (msg, client_fd);
         client->is_server_message = false;
         continue;
-      }
-
-      if (client->private_chat == 0) {
+      } else if (client->private_chat == 0) {
         printf ("%s", msg);
         broadcast_message (msg, client_fd);
       } else {
