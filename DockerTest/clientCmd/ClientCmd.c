@@ -100,7 +100,7 @@ void *receive_handler(void *arg) {
 
         size_t SkipLen = 0;
 
-        if (wcsncmp (OutputBuffer, L"/private", 8) == 0){
+        if (wcsncmp (OutputBuffer, L"PRIVATE=", 8) == 0){
           wchar_t temp[NAME_LEN];
           wcscpy (temp, OutputBuffer + 8);
           const wchar_t *sep = wcschr(temp, '|');
