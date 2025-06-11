@@ -24,6 +24,7 @@ typedef struct {
   int                   msg_index;
   char                  name[NAME_LEN];
   int                   private_chat;
+  char                  private_chat_name[NAME_LEN];
   bool                  is_server_message;
 } client_info;
 
@@ -78,6 +79,27 @@ convert_image_to_ascii (
     wait (NULL);
     return ascii;
   }
+}
+
+
+bool
+check_chat (
+  int  chat
+)
+{
+  if (chat == 0){
+    return true;
+  }
+  bool is_found = false;
+  pthread_mutex_lock (&lock);
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if ((clients[i].socket != 0) && (chat == clients[i].socket)) {
+      is_found = true;
+      break;
+    }
+  }
+  pthread_mutex_unlock (&lock);
+  return is_found;
 }
 
 void
@@ -139,6 +161,32 @@ broadcast_message (
   }
 
   pthread_mutex_unlock (&lock);
+}
+
+void
+message_hob (
+  char  *msg,
+  client_info  *client
+)
+{
+  if (client->is_server_message) {
+    send_message (msg, client->socket);
+    client->is_server_message = false;
+  } else if (client->private_chat == 0) {
+    printf ("%s", msg);
+    broadcast_message (msg, client->socket);
+  } else {
+    if (check_chat(client->private_chat) == false){
+      char fail_msg[150] = "";
+      snprintf (fail_msg, 150, "User [%s] Not Found! You Are Lobby Now.\n", client->private_chat_name);
+      send_message (fail_msg, client->socket);
+      client->private_chat = 0;
+      memset(client->private_chat_name, 0, NAME_LEN);
+    } else {
+      printf ("%s", msg);
+      private_message (msg, client->private_chat);
+    }
+  }
 }
 
 char *
@@ -205,10 +253,12 @@ handle_messages (
     }
 
     client->private_chat = 0;
+    memset(client->private_chat_name, 0, NAME_LEN);
     pthread_mutex_lock (&lock);
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if ((clients[i].socket != 0) && (strcmp (clients[i].name, new_chat) == 0)) {
         client->private_chat = clients[i].socket;
+        strcpy(client->private_chat_name, clients[i].name);
         break;
       }
     }
@@ -308,17 +358,7 @@ handle_client (
     }
 
     if (msg != NULL){
-      if (client->is_server_message) {
-        send_message (msg, client_fd);
-        client->is_server_message = false;
-        continue;
-      } else if (client->private_chat == 0) {
-        printf ("%s", msg);
-        broadcast_message (msg, client_fd);
-      } else {
-        printf ("%s", msg);
-        private_message (msg, client->private_chat);
-      }
+      message_hob(msg, client);
       free(msg);
     }
   }
@@ -353,9 +393,14 @@ main (
     }
 
     client_info  *new_client = malloc (sizeof (client_info));
-    *new_client = (client_info) {
-      client_fd, client_addr, "", 0, false
-    };
+    memset (new_client, 0, sizeof(client_info));
+
+    new_client->socket = client_fd;
+    new_client->addr = client_addr;
+    memset(new_client->name, 0, NAME_LEN);
+    new_client->private_chat = 0;
+    memset(new_client->private_chat_name, 0, NAME_LEN);
+    new_client->is_server_message = false;
 
     memset (new_client->name, 0, NAME_LEN);
     recv (client_fd, new_client->name, NAME_LEN, 0);
