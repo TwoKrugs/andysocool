@@ -230,8 +230,7 @@ handle_messages (
       int   msg_size = 128;
       msg = malloc (msg_size);
       snprintf (msg, msg_size, "你還剩下 %d 秒才能說話,你好爛.\n", remaining);
-      send_message (msg, client_fd);
-      return NULL;
+      return msg;
     }
 
     client->msg_times[client->msg_index] = now;
@@ -251,8 +250,7 @@ handle_messages (
       client->ban_until = now + 15;
       printf ("[%s] 這位用戶很皮被ban了.\n", client->name);
       snprintf (msg, msg_size, "還敢洗頻阿,拉基,15秒好好反省.\n");
-      send_message (msg, client_fd);
-      return NULL;
+      return msg;
     }
 
     size_t  new_msg_size = strlen (buffer) + strlen (client->name) + 16;
@@ -306,7 +304,6 @@ handle_client (
 
     if (msg != NULL){
       if (client->is_server_message) {
-        printf ("%s", msg);
         send_message (msg, client_fd);
         client->is_server_message = false;
         continue;
