@@ -19,6 +19,7 @@ typedef struct {
   int                   socket;
   struct sockaddr_in    addr;
   bool                  ban;
+  bool                  unban_message_sent;
   time_t                ban_until;
   time_t                msg_times[6];
   int                   msg_index;
@@ -122,7 +123,35 @@ private_message (
   send_message (new_msg, receive_fd);
   free (new_msg);
 }
+void *ban_monitor_thread(void *arg) {
+  while (1) {
+    time_t now = time(NULL);
 
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      client_info *c = &clients[i];
+      if (c->socket == 0) continue;  // 無效的 client，跳過
+      // printf("[Thread] Checking client [%s] - socket: %d, ban: %d, now: %ld, ban_until: %ld, sent: %d\n",
+      //  c->name, c->socket, c->ban, now, c->ban_until, c->unban_message_sent);
+      if (c->socket != 0 && c->ban && now >= c->ban_until && !c->unban_message_sent) {
+        c->ban = false;
+        c->ban_until = 0;
+        
+
+        printf("[Server] [%s] 此用戶已解ban,不知道敢不敢再皮.\n", c->name);
+
+        char *unban_msg = "[Server] 你已經解ban了,給我小心點.\n";
+        send_message(unban_msg, c->socket);
+        c->unban_message_sent = true;
+      }
+    }
+    pthread_mutex_unlock(&lock);
+
+    sleep(1);  // 每秒檢查一次
+  }
+
+  return NULL;
+}
 void
 broadcast_message (
   char  *msg,
@@ -171,6 +200,38 @@ handle_messages (
 
     free (ascii);
     free (img_data);
+    time_t now = time(NULL);
+    if (client->ban && (now < client->ban_until)) {
+      client->is_server_message = true;
+      int remaining = (int)(client->ban_until - now);
+      int msg_size = 128;
+      msg = realloc(msg, msg_size);
+      snprintf (msg, msg_size, "[Server] 你還剩下 %d 秒才能說話,你好爛.\n", remaining);
+      return msg;
+    }
+
+    client->msg_times[client->msg_index] = now;
+    client->msg_index = (client->msg_index + 1) % 5;
+    int recent_count = 0;
+    for (int i = 0; i < 5; i++) {
+      if (now - client->msg_times[i] <= 5) {
+        recent_count++;
+      }
+    }
+
+    if (recent_count >= 5) {
+      client->is_server_message = true;
+      int msg_size = 128;
+      pthread_mutex_lock(&lock);
+      client->ban = true;
+      client->ban_until = now + 15;
+      client->unban_message_sent = false;
+      pthread_mutex_unlock(&lock);
+      printf("[Server] [%s] 這位用戶很皮被ban了(用圖片).\n", client->name);
+      msg = realloc(msg, msg_size);
+      snprintf(msg, msg_size, "[Server] 以為圖片有用?,15秒7414.\n");
+      return msg;
+    }
   } else if (strncmp (buffer, "/memberlist", 11) == 0) {
     client->is_server_message = true;
     size_t  new_msg_size = NAME_LEN * MAX_CLIENTS + 64; // 多留一點空間
@@ -215,14 +276,24 @@ handle_messages (
 
     pthread_mutex_unlock (&lock);
     if (client->private_chat != 0) {
-      snprintf (msg, new_msg_size, "You are chat with %s\n", new_chat);
+      snprintf (msg, new_msg_size, "[Server] You are chat with %s\n", new_chat);
     } else {
       if (strcmp (new_chat, "lobby") == 0){
-        snprintf (msg, new_msg_size, "You are lobby.\n");
+        snprintf (msg, new_msg_size, "[Server] You are lobby.\n");
       } else {
-        snprintf (msg, new_msg_size, "Not found user \"%s\", you are lobby.\n", new_chat);
+        snprintf (msg, new_msg_size, "[Server] Not found user \"%s\", you are lobby.\n", new_chat);
       }
     }
+  } else if(strncmp (buffer, "/help", 5) == 0){
+    client->is_server_message = true;
+    char *help_text =
+    "===== Help Menu =====\n"
+    "/help           - 顯示這個幫助訊息\n"
+    "/chat <name>    - 私聊指定用戶\n"
+    "/chat lobby     - 回到公共聊天室\n"
+    "/memberlist     - 顯示在線成員清單\n"
+    "/img            - 傳送圖片,要附上相對路徑\n";
+    msg = strdup(help_text);
   } else {
     time_t  now = time (NULL);
     if (client->ban && (now < client->ban_until)) {
@@ -230,7 +301,7 @@ handle_messages (
       int   remaining = (int)(client->ban_until - now);
       int   msg_size = 128;
       msg = malloc (msg_size);
-      snprintf (msg, msg_size, "你還剩下 %d 秒才能說話,你好爛.\n", remaining);
+      snprintf (msg, msg_size, "[Server] 你還剩下 %d 秒才能說話,你好爛.\n", remaining);
       return msg;
     }
 
@@ -247,10 +318,13 @@ handle_messages (
       client->is_server_message = true;
       int   msg_size = 128;
       msg = malloc (msg_size);
+      pthread_mutex_lock(&lock);   // <--- 你需要加鎖
       client->ban       = true;
       client->ban_until = now + 15;
-      printf ("[%s] 這位用戶很皮被ban了.\n", client->name);
-      snprintf (msg, msg_size, "還敢洗頻阿,拉基,15秒好好反省.\n");
+      client->unban_message_sent = false;
+      pthread_mutex_unlock(&lock); // <--- 解鎖
+      printf ("[Server] [%s] 這位用戶很皮被ban了.\n", client->name);
+      snprintf (msg, msg_size, "[Server] 還敢洗頻阿,拉基,15秒好好反省.\n");
       return msg;
     }
 
@@ -275,11 +349,9 @@ handle_client (
   size_t  msg_size = BUF_SIZE;
 
   msg = malloc (msg_size);
-
-  snprintf (msg, msg_size, "[%s] joined the chat.\n", client->name);
+  snprintf (msg, msg_size, "[Server] [%s] joined the chat.\n", client->name);
   printf ("%s", msg);
   broadcast_message (msg, client_fd);
-
   free (msg);
 
   while (1) {
@@ -287,10 +359,11 @@ handle_client (
     int  bytes = recv (client_fd, buffer, sizeof (buffer), 0);
     if (bytes <= 0) {
       msg = malloc (msg_size);
-      snprintf (msg, msg_size, "[%s] left the chat.\n", client->name);
+      snprintf (msg, msg_size, "[Server] [%s] left the chat.\n", client->name);
       printf ("%s", msg);
       broadcast_message (msg, client_fd);
       close (client_fd);
+
       pthread_mutex_lock (&lock);
       for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket == client_fd) {
@@ -298,26 +371,28 @@ handle_client (
           break;
         }
       }
-
       pthread_mutex_unlock (&lock);
+
       free (msg);
-      free (client);
+      // free (client);
       break;
-    } else {
-      msg = handle_messages (client, client_fd, buffer);
     }
 
-    if (msg != NULL){
+    
+    
+    
+    msg = handle_messages(client, client_fd, buffer);
+
+    if (msg != NULL) {
       if (client->is_server_message) {
-        send_message (msg, client_fd);
+        send_message(msg, client_fd);
         client->is_server_message = false;
-        continue;
       } else if (client->private_chat == 0) {
-        printf ("%s", msg);
-        broadcast_message (msg, client_fd);
+        printf("%s", msg);
+        broadcast_message(msg, client_fd);
       } else {
-        printf ("%s", msg);
-        private_message (msg, client->private_chat);
+        printf("%s", msg);
+        private_message(msg, client->private_chat);
       }
       free(msg);
     }
@@ -325,6 +400,7 @@ handle_client (
 
   return NULL;
 }
+
 
 int
 main (
@@ -341,46 +417,54 @@ main (
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port        = htons (PORT);
 
+  pthread_t ban_thread;
+  pthread_create(&ban_thread, NULL, ban_monitor_thread, NULL);
+  pthread_detach(ban_thread);
+
   bind (server_fd, (struct sockaddr *)&server_addr, sizeof (server_addr));
   listen (server_fd, MAX_CLIENTS);
-  printf ("Server is listening on port %d...\n", PORT);
+  printf ("[Server] Server is listening on port %d...\n", PORT);
 
   while (1) {
     int  client_fd = accept (server_fd, (struct sockaddr *)&client_addr, &addr_len);
     if (client_fd < 0) {
-      perror ("accept failed");
+      perror ("[Server] accept failed");
       continue;
     }
 
-    client_info  *new_client = malloc (sizeof (client_info));
-    *new_client = (client_info) {
-      client_fd, client_addr, "", 0, false
-    };
+    // client_info *new_client = calloc(1, sizeof(client_info));
+    // new_client->unban_message_sent =false;
+    // new_client->socket = client_fd;
+    // new_client->addr = client_addr;
 
-    memset (new_client->name, 0, NAME_LEN);
-    recv (client_fd, new_client->name, NAME_LEN, 0);
+    // memset (new_client->name, 0, NAME_LEN);
+    // recv (client_fd, new_client->name, NAME_LEN, 0);
 
-    pthread_mutex_lock (&lock);
-    int  stored = 0;
+    pthread_mutex_lock(&lock);
+    int stored = 0;
+    client_info *assigned_client = NULL;
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (clients[i].socket == 0) {
-        clients[i] = *new_client;
-        stored     = 1;
+        clients[i].socket = client_fd;
+        clients[i].addr = client_addr;
+        clients[i].unban_message_sent = false;
+        recv(client_fd, clients[i].name, NAME_LEN, 0);
+        assigned_client = &clients[i];  
+        stored = 1;
         break;
       }
     }
-
-    pthread_mutex_unlock (&lock);
+    pthread_mutex_unlock(&lock);
 
     if (!stored) {
-      printf ("Max clients reached. Connection rejected.\n");
-      close (client_fd);
+      printf("[Server] Max clients reached. Connection rejected.\n");
+      close(client_fd);
       continue;
     }
 
-    pthread_t  thread_id;
-    pthread_create (&thread_id, NULL, handle_client, new_client);
-    pthread_detach (thread_id);
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, handle_client, assigned_client); 
+    pthread_detach(thread_id);
   }
 
   close (server_fd);
