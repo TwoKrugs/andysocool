@@ -14,6 +14,7 @@
 #define MAX_CLIENTS  10
 #define NAME_LEN     100
 #define BUF_SIZE     2048
+#define LOBBY_NAME   "lobby"
 
 typedef struct {
   int                   socket;
@@ -25,6 +26,7 @@ typedef struct {
   int                   msg_index;
   char                  name[NAME_LEN];
   int                   private_chat;
+  char                  private_chat_name[NAME_LEN];
   bool                  is_server_message;
 } client_info;
 
@@ -81,6 +83,27 @@ convert_image_to_ascii (
   }
 }
 
+
+bool
+check_chat (
+  int  chat
+)
+{
+  if (chat == 0){
+    return true;
+  }
+  bool is_found = false;
+  pthread_mutex_lock (&lock);
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if ((clients[i].socket != 0) && (chat == clients[i].socket)) {
+      is_found = true;
+      break;
+    }
+  }
+  pthread_mutex_unlock (&lock);
+  return is_found;
+}
+
 void
 send_message (
   char  *msg,
@@ -119,7 +142,7 @@ private_message (
 {
   size_t length  = strlen(msg) + 4;
   char  *new_msg = malloc(length);
-  snprintf (new_msg, length, "/p%s", msg);
+  snprintf (new_msg, length, "/p %s", msg);
   send_message (new_msg, receive_fd);
   free (new_msg);
 }
@@ -168,6 +191,32 @@ broadcast_message (
   }
 
   pthread_mutex_unlock (&lock);
+}
+
+void
+message_hob (
+  char  *msg,
+  client_info  *client
+)
+{
+  if (client->is_server_message) {
+    send_message (msg, client->socket);
+    client->is_server_message = false;
+  } else if (client->private_chat == 0) {
+    printf ("%s", msg);
+    broadcast_message (msg, client->socket);
+  } else {
+    if (check_chat(client->private_chat) == false){
+      char fail_msg[150] = "";
+      snprintf (fail_msg, 150, "PRIVATE=%s|User [%s] Not Found! You Are In The Lobby.\n", LOBBY_NAME, client->private_chat_name);
+      send_message (fail_msg, client->socket);
+      client->private_chat = 0;
+      strcpy (client->private_chat_name, LOBBY_NAME);
+    } else {
+      printf ("%s", msg);
+      private_message (msg, client->private_chat);
+    }
+  }
 }
 
 char *
@@ -245,16 +294,16 @@ handle_messages (
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (clients[i].socket != 0) {
         // 追加使用 snprintf，保證不溢位
-        printf ("%s\n", clients[i].name);
+        // printf ("%s\n", clients[i].name);
         used += snprintf (msg + used, new_msg_size - used, "[%s] ", clients[i].name);
-        printf ("%s\n", msg);
+        // printf ("%s\n", msg);
       }
     }
 
     pthread_mutex_unlock (&lock);
-    printf ("%s\n", msg);
+    // printf ("%s\n", msg);
     snprintf (msg + used, new_msg_size - used, "\n");  // 安全補上換行
-    printf ("%s", msg);
+    printf ("[%s] %s",client->name, msg);
   } else if (strncmp (buffer, "/chat ", 6) == 0) {
     client->is_server_message = true;
     size_t  new_msg_size = BUF_SIZE;
@@ -266,22 +315,24 @@ handle_messages (
     }
 
     client->private_chat = 0;
+    strcpy (client->private_chat_name, LOBBY_NAME);
     pthread_mutex_lock (&lock);
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if ((clients[i].socket != 0) && (strcmp (clients[i].name, new_chat) == 0)) {
         client->private_chat = clients[i].socket;
+        strcpy(client->private_chat_name, clients[i].name);
         break;
       }
     }
 
     pthread_mutex_unlock (&lock);
     if (client->private_chat != 0) {
-      snprintf (msg, new_msg_size, "[Server] You are chat with %s\n", new_chat);
+      snprintf (msg, new_msg_size, "PRIVATE=%s|You are in the chat with %s\n", new_chat, new_chat);
     } else {
       if (strcmp (new_chat, "lobby") == 0){
-        snprintf (msg, new_msg_size, "[Server] You are lobby.\n");
+        snprintf (msg, new_msg_size, "PRIVATE=%s|You are in the lobby.\n", LOBBY_NAME);
       } else {
-        snprintf (msg, new_msg_size, "[Server] Not found user \"%s\", you are lobby.\n", new_chat);
+        snprintf (msg, new_msg_size, "PRIVATE=%s|Not found user \"%s\", you are in the lobby.\n", LOBBY_NAME, new_chat);
       }
     }
   } else if(strncmp (buffer, "/help", 5) == 0){
@@ -292,7 +343,7 @@ handle_messages (
     "/chat <name>    - 私聊指定用戶\n"
     "/chat lobby     - 回到公共聊天室\n"
     "/memberlist     - 顯示在線成員清單\n"
-    "/img            - 傳送圖片,要附上相對路徑\n";
+    "/img  <root>    - 傳送圖片,要附上相對路徑\n";
     msg = strdup(help_text);
   } else {
     time_t  now = time (NULL);
@@ -377,23 +428,11 @@ handle_client (
       // free (client);
       break;
     }
+    msg = NULL;  // <--- 每次迴圈開始先清空
 
-    
-    
-    
-    msg = handle_messages(client, client_fd, buffer);
-
-    if (msg != NULL) {
-      if (client->is_server_message) {
-        send_message(msg, client_fd);
-        client->is_server_message = false;
-      } else if (client->private_chat == 0) {
-        printf("%s", msg);
-        broadcast_message(msg, client_fd);
-      } else {
-        printf("%s", msg);
-        private_message(msg, client->private_chat);
-      }
+    msg = handle_messages(client, client_fd, buffer);  // 假設你漏寫這行
+    if (msg != NULL){
+      message_hob(msg, client);
       free(msg);
     }
   }
@@ -432,10 +471,15 @@ main (
       continue;
     }
 
-    // client_info *new_client = calloc(1, sizeof(client_info));
-    // new_client->unban_message_sent =false;
+    // client_info  *new_client = malloc (sizeof (client_info));
+    // memset (new_client, 0, sizeof(client_info));
+
     // new_client->socket = client_fd;
     // new_client->addr = client_addr;
+    // memset(new_client->name, 0, NAME_LEN);
+    // new_client->private_chat = 0;
+    // strcpy (new_client->private_chat_name, LOBBY_NAME);
+    // new_client->is_server_message = false;
 
     // memset (new_client->name, 0, NAME_LEN);
     // recv (client_fd, new_client->name, NAME_LEN, 0);
@@ -444,17 +488,37 @@ main (
     int stored = 0;
     client_info *assigned_client = NULL;
     for (int i = 0; i < MAX_CLIENTS; i++) {
-      if (clients[i].socket == 0) {
-        clients[i].socket = client_fd;
-        clients[i].addr = client_addr;
-        clients[i].unban_message_sent = false;
-        recv(client_fd, clients[i].name, NAME_LEN, 0);
-        assigned_client = &clients[i];  
-        stored = 1;
-        break;
-      }
+        if (clients[i].socket == 0) {
+            // 先清空整個結構，避免殘留資料
+            memset(&clients[i], 0, sizeof(client_info));
+
+            // 初始化欄位
+            clients[i].socket = client_fd;
+            clients[i].addr = client_addr;
+            clients[i].private_chat = 0;
+            strcpy(clients[i].private_chat_name, LOBBY_NAME);
+            clients[i].is_server_message = false;
+            clients[i].unban_message_sent = false;
+
+            // 接收 client 名字
+            int recv_len = recv(client_fd, clients[i].name, NAME_LEN - 1, 0);
+            if (recv_len <= 0) {
+                // 失敗的話把這個 slot 重置回空
+                memset(&clients[i], 0, sizeof(client_info));
+                pthread_mutex_unlock(&lock);
+                // 處理錯誤，關閉 socket 或其他動作
+                close(client_fd);
+                return -1;  // 或 continue，看你的程式結構
+            }
+            clients[i].name[recv_len] = '\0';  // 補字串結尾
+
+            assigned_client = &clients[i];
+            stored = 1;
+            break;
+        }
     }
     pthread_mutex_unlock(&lock);
+
 
     if (!stored) {
       printf("[Server] Max clients reached. Connection rejected.\n");
