@@ -107,7 +107,7 @@ void *receive_handler(void *arg) {
           SkipLen = sep - temp; // 計算 | 前的長度
           memset (gChatTarget, 0, NAME_LEN);
           wcsncpy(gChatTarget, temp, SkipLen);
-          SkipLen += 8;
+          SkipLen += 9;
         }
 
         wprintf(L"%s", OutputBuffer + SkipLen);
