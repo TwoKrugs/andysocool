@@ -213,7 +213,11 @@ message_hob (
       client->private_chat = 0;
       strcpy (client->private_chat_name, LOBBY_NAME);
     } else {
-      printf ("%s", msg);
+      int log_size = strlen(msg) + NAME_LEN + 16;
+      char log[log_size];
+      size_t msg_len = strcspn(msg, "\n");  // 找到 '\n' 之前的長度
+      snprintf(log, log_size, "%.*s [%s]\n", (int)msg_len, msg, client->private_chat_name);
+      printf ("%s", log);
       private_message (msg, client->private_chat);
     }
   }
